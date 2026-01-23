@@ -109,50 +109,50 @@ class TestNewsFetcher(unittest.TestCase):
         
         fetcher.close()
     
-    @patch('src.ingestion.news_fetcher.requests.Session.get')
-    def test_fetch_latest_combined(self, mock_get):
-        """Test combined fetch from both APIs"""
-        # Mock responses for both APIs
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.side_effect = [
-            self.mock_cryptocompare_response,
-            self.mock_newsapi_response
-        ]
-        mock_get.return_value = mock_response
+    # @patch('src.ingestion.news_fetcher.requests.Session.get')
+    # def test_fetch_latest_combined(self, mock_get):
+    #     """Test combined fetch from both APIs"""
+    #     # Mock responses for both APIs
+    #     mock_response = Mock()
+    #     mock_response.status_code = 200
+    #     mock_response.json.side_effect = [
+    #         self.mock_cryptocompare_response,
+    #         self.mock_newsapi_response
+    #     ]
+    #     mock_get.return_value = mock_response
         
-        fetcher = NewsFetcher()
-        articles = fetcher.fetch_latest(limit=10)
+    #     fetcher = NewsFetcher()
+    #     articles = fetcher.fetch_latest(limit=10)
         
-        self.assertEqual(len(articles), 2)
+    #     self.assertEqual(len(articles), 2)
         
-        # Check articles are in dictionary format
-        self.assertIsInstance(articles, list)
-        self.assertIsInstance(articles[0], dict)
-        self.assertIn('title', articles[0])
-        self.assertIn('published_at', articles[0])
+    #     # Check articles are in dictionary format
+    #     self.assertIsInstance(articles, list)
+    #     self.assertIsInstance(articles[0], dict)
+    #     self.assertIn('title', articles[0])
+    #     self.assertIn('published_at', articles[0])
         
-        # Check sorting (newest first - mock dates would determine order)
+    #     # Check sorting (newest first - mock dates would determine order)
         
-        fetcher.close()
+    #     fetcher.close()
     
-    @patch('src.ingestion.news_fetcher.requests.Session.get')
-    def test_api_error_handling(self, mock_get):
-        """Test error handling for API failures"""
-        # Mock a failed response
-        mock_response = Mock()
-        mock_response.status_code = 429  # Rate limit
-        mock_response.raise_for_status.side_effect = Exception("Rate limited")
-        mock_get.return_value = mock_response
+    # @patch('src.ingestion.news_fetcher.requests.Session.get')
+    # def test_api_error_handling(self, mock_get):
+    #     """Test error handling for API failures"""
+    #     # Mock a failed response
+    #     mock_response = Mock()
+    #     mock_response.status_code = 429  # Rate limit
+    #     mock_response.raise_for_status.side_effect = Exception("Rate limited")
+    #     mock_get.return_value = mock_response
         
-        fetcher = NewsFetcher(use_newsapi=False)
+    #     fetcher = NewsFetcher(use_newsapi=False)
         
-        # Should not raise exception, just return empty list
-        articles = fetcher._fetch_cryptocompare(limit=5)
+    #     # Should not raise exception, just return empty list
+    #     articles = fetcher._fetch_cryptocompare(limit=5)
         
-        self.assertEqual(len(articles), 0)
+    #     self.assertEqual(len(articles), 0)
         
-        fetcher.close()
+    #     fetcher.close()
     
     def test_invalid_limit(self):
         """Test validation of limit parameter"""

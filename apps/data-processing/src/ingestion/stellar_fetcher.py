@@ -90,7 +90,7 @@ class StellarDataFetcher:
     RETRY_DELAY = 1  # seconds
     REQUEST_TIMEOUT = 30  # seconds
     
-    def __init__(self, horizon_url: Optional[str] = None, network: str = "public"):
+    def __init__(self, horizon_url: Optional[str] = None, network: str = "public", timeout: Optional[float] = None):
         """
         Initialize Stellar data fetcher.
         
@@ -109,8 +109,9 @@ class StellarDataFetcher:
         print(f"Connecting to Horizon server: {self.horizon_url}")
         
         # Initialize Stellar SDK server
-        self.server = Server(horizon_url=self.horizon_url, timeout=self.REQUEST_TIMEOUT)
-        
+        self.timeout = timeout if timeout is not None else self.REQUEST_TIMEOUT
+        self.server = Server(horizon_url=self.horizon_url, timeout=self.timeout)  
+              
         # Cache for recent requests
         self.cache = {}
         self.cache_ttl = 300  # 5 minutes
