@@ -1,13 +1,31 @@
 import React from 'react';
-import { StyleSheet, Text, View, SafeAreaView } from 'react-native';
+import { StyleSheet, Text, View, SafeAreaView, Button } from 'react-native';
+import { useAuth } from '../../src/context/AuthContext';
+import { useRouter } from 'expo-router';
 
 export default function SettingsScreen() {
+  const { user, logout } = useAuth();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await logout();
+    router.replace('/(tabs)'); // go back to Home tab
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <Text style={styles.title}>Settings</Text>
         <Text style={styles.text}>App version: 1.0.0</Text>
-        <Text style={styles.text}>Lumenpulse Mobile Contributor Edition</Text>
+        <Text style={styles.text}>
+          Lumenpulse Mobile Contributor Edition
+        </Text>
+
+        {user && (
+          <View style={{ marginTop: 32 }}>
+            <Button title="Logout" onPress={handleLogout} />
+          </View>
+        )}
       </View>
     </SafeAreaView>
   );
