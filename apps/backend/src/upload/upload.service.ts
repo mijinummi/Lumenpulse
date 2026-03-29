@@ -17,7 +17,6 @@ export class UploadService implements OnModuleInit {
     this.bucketName = this.configService.getOrThrow<string>('AWS_BUCKET_NAME');
     this.s3Client = new S3Client({
       region: this.configService.getOrThrow<string>('AWS_REGION'),
-      endpoint: 'https://storage.googleapis.com',
       credentials: {
         accessKeyId: this.configService.getOrThrow<string>('AWS_ACCESS_KEY_ID'),
         secretAccessKey: this.configService.getOrThrow<string>(
