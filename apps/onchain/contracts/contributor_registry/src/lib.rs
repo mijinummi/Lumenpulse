@@ -6,7 +6,10 @@ mod multisig;
 mod storage;
 
 use errors::ContributorError;
-use events::{AdminChangedEvent, GaslessRegistrationEvent, MultisigConfiguredEvent, UpgradedEvent, BadgeGrantedEvent, BadgeRevokedEvent};
+use events::{
+    AdminChangedEvent, BadgeGrantedEvent, BadgeRevokedEvent, GaslessRegistrationEvent,
+    MultisigConfiguredEvent, UpgradedEvent,
+};
 use multisig::{
     cancel, consume_approval, expire, get_config, get_proposal, propose, sign, validate_config,
     MultisigConfig, ProposalAction, ProposalStatus, Signer,
@@ -16,7 +19,7 @@ use soroban_sdk::xdr::FromXdr;
 use soroban_sdk::{
     contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Vec,
 };
-use storage::{ContributorData, DataKey, ContributorTier, Badge};
+use storage::{Badge, ContributorData, ContributorTier, DataKey};
 
 #[contract]
 pub struct ContributorRegistryContract;
@@ -349,12 +352,7 @@ impl ContributorRegistryContract {
         contributor_address: Address,
         badge: Badge,
     ) -> Result<(), ContributorError> {
-        consume_approval(
-            &env,
-            &executor,
-            proposal_id,
-            &ProposalAction::GrantBadge,
-        )?;
+        consume_approval(&env, &executor, proposal_id, &ProposalAction::GrantBadge)?;
 
         // Ensure contributor exists
         let _ = Self::get_contributor(env.clone(), contributor_address.clone())?;
@@ -389,12 +387,7 @@ impl ContributorRegistryContract {
         contributor_address: Address,
         badge: Badge,
     ) -> Result<(), ContributorError> {
-        consume_approval(
-            &env,
-            &executor,
-            proposal_id,
-            &ProposalAction::RevokeBadge,
-        )?;
+        consume_approval(&env, &executor, proposal_id, &ProposalAction::RevokeBadge)?;
 
         // Ensure contributor exists
         let _ = Self::get_contributor(env.clone(), contributor_address.clone())?;
