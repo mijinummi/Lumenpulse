@@ -13,7 +13,9 @@ use notification_interface::{Notification, NotificationReceiverClient};
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contractimpl, vec, Address, BytesN, Env, Symbol, Vec};
-use storage::{DataKey, ProjectData, ProtocolStats};
+use storage::{
+    DataKey, MilestoneDispute, ProjectData, ProtocolStats, LEDGER_BUMP, LEDGER_THRESHOLD,
+};
 
 const CURRENT_STORAGE_VERSION: u32 = 1;
 const DEFAULT_MILESTONE_EXPIRY_SECONDS: u64 = 30 * 24 * 60 * 60;
@@ -161,6 +163,9 @@ impl CrowdfundVaultContract {
         }
 
         caller.require_auth();
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
         Ok(())
     }
 
@@ -202,6 +207,9 @@ impl CrowdfundVaultContract {
             storage_version: CURRENT_STORAGE_VERSION,
         }
         .publish(&env);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
 
         Ok(())
     }
@@ -287,22 +295,44 @@ impl CrowdfundVaultContract {
         env.storage()
             .persistent()
             .set(&DataKey::Project(project_id), &project);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Project(project_id),
+            LEDGER_THRESHOLD,
+            LEDGER_BUMP,
+        );
 
-        // Initialize project balance (construct key once)
+        // Initialize project balance (construct key once and reuse)
         let balance_key = DataKey::ProjectBalance(project_id, token_address.clone());
         env.storage().persistent().set(&balance_key, &0i128);
+        env.storage()
+            .persistent()
+            .extend_ttl(&balance_key, LEDGER_THRESHOLD, LEDGER_BUMP);
 
         // Initialize milestone approval status (first milestone is 0)
         env.storage()
             .persistent()
             .set(&DataKey::MilestoneApproved(project_id, 0), &false);
+        env.storage().persistent().extend_ttl(
+            &DataKey::MilestoneApproved(project_id, 0),
+            LEDGER_THRESHOLD,
+            LEDGER_BUMP,
+        );
+        let expiry_key = DataKey::ProjectMilestoneExpiry(project_id);
         env.storage().persistent().set(
-            &DataKey::ProjectMilestoneExpiry(project_id),
+            &expiry_key,
             &(env.ledger().timestamp() + DEFAULT_MILESTONE_EXPIRY_SECONDS),
         );
         env.storage()
             .persistent()
+            .extend_ttl(&expiry_key, LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.storage()
+            .persistent()
             .set(&DataKey::ProjectRefundWindowDeadline(project_id), &0u64);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ProjectRefundWindowDeadline(project_id),
+            LEDGER_THRESHOLD,
+            LEDGER_BUMP,
+        );
 
         // Increment project ID counter
         env.storage()
@@ -443,6 +473,16 @@ impl CrowdfundVaultContract {
         env.storage()
             .persistent()
             .remove(&DataKey::ProjectRefundWindowDeadline(project_id));
+        // State compaction: remove per-campaign entries that are no longer needed.
+        env.storage()
+            .persistent()
+            .remove(&DataKey::ProjectStatus(project_id));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::ProjectMilestoneExpiry(project_id));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::MilestoneApproved(project_id, 0));
         Self::reduce_protocol_tvl(&env, total_refunded);
 
         Ok(())
@@ -586,6 +626,9 @@ impl CrowdfundVaultContract {
         env.storage()
             .persistent()
             .set(&balance_key, &(current_balance + amount));
+        env.storage()
+            .persistent()
+            .extend_ttl(&balance_key, LEDGER_THRESHOLD, LEDGER_BUMP);
 
         // Track individual contribution for quadratic funding
         let contribution_key = DataKey::Contribution(project_id, user.clone());
@@ -605,26 +648,41 @@ impl CrowdfundVaultContract {
                 .unwrap_or(0);
 
             // Store contributor at index
+            let contrib_idx_key = DataKey::Contributor(project_id, contributor_count);
+            env.storage().persistent().set(&contrib_idx_key, &user);
             env.storage()
                 .persistent()
-                .set(&DataKey::Contributor(project_id, contributor_count), &user);
+                .extend_ttl(&contrib_idx_key, LEDGER_THRESHOLD, LEDGER_BUMP);
 
             // Increment contributor count
             env.storage()
                 .persistent()
                 .set(&contributor_count_key, &(contributor_count + 1));
+            env.storage().persistent().extend_ttl(
+                &contributor_count_key,
+                LEDGER_THRESHOLD,
+                LEDGER_BUMP,
+            );
         }
 
         // Update contribution amount
         env.storage()
             .persistent()
             .set(&contribution_key, &(current_contribution + amount));
+        env.storage()
+            .persistent()
+            .extend_ttl(&contribution_key, LEDGER_THRESHOLD, LEDGER_BUMP);
 
         // Update project total deposited
         project.total_deposited += amount;
         env.storage()
             .persistent()
             .set(&DataKey::Project(project_id), &project);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Project(project_id),
+            LEDGER_THRESHOLD,
+            LEDGER_BUMP,
+        );
 
         // Update global protocol stats
         let mut stats: ProtocolStats = env
@@ -751,9 +809,18 @@ impl CrowdfundVaultContract {
         env.storage()
             .persistent()
             .set(&DataKey::MilestoneApproved(project_id, milestone_id), &true);
+        env.storage().persistent().set(
+            &DataKey::MilestoneDisputed(project_id, milestone_id),
+            &false,
+        );
 
         // Emit milestone approval event
-        events::MilestoneApprovedEvent { admin, project_id }.publish(&env);
+        events::MilestoneApprovedEvent {
+            admin,
+            project_id,
+            milestone_id,
+        }
+        .publish(&env);
 
         Ok(())
     }
@@ -924,6 +991,10 @@ impl CrowdfundVaultContract {
             env.storage()
                 .persistent()
                 .set(&DataKey::MilestoneApproved(project_id, milestone_id), &true);
+            env.storage().persistent().set(
+                &DataKey::MilestoneDisputed(project_id, milestone_id),
+                &false,
+            );
             events::MilestoneApprovedByVoteEvent {
                 project_id,
                 milestone_id,
@@ -986,6 +1057,15 @@ impl CrowdfundVaultContract {
             return Err(CrowdfundError::MilestoneNotApproved);
         }
 
+        let is_disputed: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MilestoneDisputed(project_id, milestone_id))
+            .unwrap_or(false);
+        if is_disputed {
+            return Err(CrowdfundError::MilestoneEscrowed);
+        }
+
         // Construct balance key once
         let balance_key = DataKey::ProjectBalance(project_id, project.token_address.clone());
         let total_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
@@ -1046,16 +1126,28 @@ impl CrowdfundVaultContract {
         env.storage()
             .persistent()
             .set(&balance_key, &(total_balance - amount));
+        env.storage()
+            .persistent()
+            .extend_ttl(&balance_key, LEDGER_THRESHOLD, LEDGER_BUMP);
 
         // Update project total withdrawn
         project.total_withdrawn += amount;
         env.storage()
             .persistent()
             .set(&DataKey::Project(project_id), &project);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Project(project_id),
+            LEDGER_THRESHOLD,
+            LEDGER_BUMP,
+        );
+        let expiry_key = DataKey::ProjectMilestoneExpiry(project_id);
         env.storage().persistent().set(
-            &DataKey::ProjectMilestoneExpiry(project_id),
+            &expiry_key,
             &(env.ledger().timestamp() + DEFAULT_MILESTONE_EXPIRY_SECONDS),
         );
+        env.storage()
+            .persistent()
+            .extend_ttl(&expiry_key, LEDGER_THRESHOLD, LEDGER_BUMP);
         env.storage()
             .persistent()
             .remove(&DataKey::ProjectRefundWindowDeadline(project_id));
@@ -1085,6 +1177,113 @@ impl CrowdfundVaultContract {
         Ok(())
     }
 
+    /// Formally challenge a completed milestone and escrow further payouts.
+    pub fn dispute_milestone(
+        env: Env,
+        challenger: Address,
+        project_id: u64,
+        milestone_id: u32,
+        reason: Symbol,
+    ) -> Result<(), CrowdfundError> {
+        challenger.require_auth();
+
+        env.storage()
+            .persistent()
+            .get::<_, ProjectData>(&DataKey::Project(project_id))
+            .ok_or(CrowdfundError::ProjectNotFound)?;
+
+        let is_approved: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MilestoneApproved(project_id, milestone_id))
+            .unwrap_or(false);
+        if !is_approved {
+            return Err(CrowdfundError::MilestoneNotApproved);
+        }
+
+        let contribution: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Contribution(project_id, challenger.clone()))
+            .unwrap_or(0);
+        if contribution <= 0 {
+            return Err(CrowdfundError::InsufficientContributionToVote);
+        }
+
+        let is_disputed: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MilestoneDisputed(project_id, milestone_id))
+            .unwrap_or(false);
+        if is_disputed {
+            return Err(CrowdfundError::MilestoneAlreadyDisputed);
+        }
+
+        let dispute = MilestoneDispute {
+            project_id,
+            milestone_id,
+            challenger: challenger.clone(),
+            opened_at: env.ledger().timestamp(),
+            reason,
+        };
+
+        env.storage().persistent().set(
+            &DataKey::MilestoneDispute(project_id, milestone_id),
+            &dispute,
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::MilestoneDisputed(project_id, milestone_id), &true);
+
+        events::MilestoneDisputedEvent {
+            project_id,
+            milestone_id,
+            challenger,
+            reason: dispute.reason.clone(),
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Resolve a milestone dispute and either restore or revoke payout eligibility.
+    pub fn resolve_milestone_dispute(
+        env: Env,
+        admin: Address,
+        project_id: u64,
+        milestone_id: u32,
+        upheld_completion: bool,
+    ) -> Result<(), CrowdfundError> {
+        Self::verify_admin(&env, &admin)?;
+
+        env.storage()
+            .persistent()
+            .get::<_, MilestoneDispute>(&DataKey::MilestoneDispute(project_id, milestone_id))
+            .ok_or(CrowdfundError::MilestoneNotDisputed)?;
+
+        env.storage().persistent().set(
+            &DataKey::MilestoneDisputed(project_id, milestone_id),
+            &false,
+        );
+        env.storage()
+            .persistent()
+            .remove(&DataKey::MilestoneDispute(project_id, milestone_id));
+        env.storage().persistent().set(
+            &DataKey::MilestoneApproved(project_id, milestone_id),
+            &upheld_completion,
+        );
+
+        events::MilestoneDisputeResolvedEvent {
+            admin,
+            project_id,
+            milestone_id,
+            upheld_completion,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
     /// Register a new contributor
     pub fn register_contributor(env: Env, contributor: Address) -> Result<(), CrowdfundError> {
         Self::require_current_storage_version(&env)?;
@@ -1104,11 +1303,21 @@ impl CrowdfundVaultContract {
         env.storage()
             .persistent()
             .set(&DataKey::RegisteredContributor(contributor.clone()), &true);
+        env.storage().persistent().extend_ttl(
+            &DataKey::RegisteredContributor(contributor.clone()),
+            LEDGER_THRESHOLD,
+            LEDGER_BUMP,
+        );
 
         // Initialize reputation
         env.storage()
             .persistent()
             .set(&DataKey::Reputation(contributor.clone()), &0i128);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Reputation(contributor.clone()),
+            LEDGER_THRESHOLD,
+            LEDGER_BUMP,
+        );
 
         // Emit registration event
         events::ContributorRegisteredEvent { contributor }.publish(&env);
@@ -1147,6 +1356,11 @@ impl CrowdfundVaultContract {
         env.storage()
             .persistent()
             .set(&DataKey::Reputation(contributor.clone()), &new_reputation);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Reputation(contributor.clone()),
+            LEDGER_THRESHOLD,
+            LEDGER_BUMP,
+        );
 
         // Emit reputation change event
         events::ReputationUpdatedEvent {
@@ -1179,24 +1393,38 @@ impl CrowdfundVaultContract {
     /// Get project data
     pub fn get_project(env: Env, project_id: u64) -> Result<ProjectData, CrowdfundError> {
         Self::require_current_storage_version(&env)?;
+        let key = DataKey::Project(project_id);
+        let data = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(CrowdfundError::ProjectNotFound)?;
         env.storage()
             .persistent()
-            .get(&DataKey::Project(project_id))
-            .ok_or(CrowdfundError::ProjectNotFound)
+            .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
+        Ok(data)
     }
 
     /// Get project balance
     pub fn get_balance(env: Env, project_id: u64) -> Result<i128, CrowdfundError> {
         Self::require_current_storage_version(&env)?;
         // Get project to get token address (use destructuring to avoid full clone)
+        let project_key = DataKey::Project(project_id);
         let project: ProjectData = env
             .storage()
             .persistent()
-            .get(&DataKey::Project(project_id))
+            .get(&project_key)
             .ok_or(CrowdfundError::ProjectNotFound)?;
+        env.storage()
+            .persistent()
+            .extend_ttl(&project_key, LEDGER_THRESHOLD, LEDGER_BUMP);
 
         let balance_key = DataKey::ProjectBalance(project_id, project.token_address);
-        Ok(env.storage().persistent().get(&balance_key).unwrap_or(0))
+        let balance = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        env.storage()
+            .persistent()
+            .extend_ttl(&balance_key, LEDGER_THRESHOLD, LEDGER_BUMP);
+        Ok(balance)
     }
 
     /// Check if milestone is approved for a project
@@ -1207,6 +1435,34 @@ impl CrowdfundVaultContract {
     ) -> Result<bool, CrowdfundError> {
         Self::require_current_storage_version(&env)?;
         // Check if project exists (single get instead of has + get)
+        let project_key = DataKey::Project(project_id);
+        env.storage()
+            .persistent()
+            .get::<_, ProjectData>(&project_key)
+            .ok_or(CrowdfundError::ProjectNotFound)?;
+        env.storage()
+            .persistent()
+            .extend_ttl(&project_key, LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        let milestone_key = DataKey::MilestoneApproved(project_id, milestone_id);
+        let approved = env
+            .storage()
+            .persistent()
+            .get(&milestone_key)
+            .unwrap_or(false);
+        if env.storage().persistent().has(&milestone_key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(&milestone_key, LEDGER_THRESHOLD, LEDGER_BUMP);
+        }
+        Ok(approved)
+    }
+
+    pub fn is_milestone_disputed(
+        env: Env,
+        project_id: u64,
+        milestone_id: u32,
+    ) -> Result<bool, CrowdfundError> {
         env.storage()
             .persistent()
             .get::<_, ProjectData>(&DataKey::Project(project_id))
@@ -1215,8 +1471,24 @@ impl CrowdfundVaultContract {
         Ok(env
             .storage()
             .persistent()
-            .get(&DataKey::MilestoneApproved(project_id, milestone_id))
+            .get(&DataKey::MilestoneDisputed(project_id, milestone_id))
             .unwrap_or(false))
+    }
+
+    pub fn get_milestone_dispute(
+        env: Env,
+        project_id: u64,
+        milestone_id: u32,
+    ) -> Result<MilestoneDispute, CrowdfundError> {
+        env.storage()
+            .persistent()
+            .get::<_, ProjectData>(&DataKey::Project(project_id))
+            .ok_or(CrowdfundError::ProjectNotFound)?;
+
+        env.storage()
+            .persistent()
+            .get(&DataKey::MilestoneDispute(project_id, milestone_id))
+            .ok_or(CrowdfundError::MilestoneNotDisputed)
     }
 
     /// Get admin address
@@ -1246,6 +1518,9 @@ impl CrowdfundVaultContract {
         env.storage()
             .persistent()
             .set(&pool_key, &(current_pool + amount));
+        env.storage()
+            .persistent()
+            .extend_ttl(&pool_key, LEDGER_THRESHOLD, LEDGER_BUMP);
 
         Ok(())
     }
@@ -1275,6 +1550,9 @@ impl CrowdfundVaultContract {
         env.storage()
             .persistent()
             .set(&pool_key, &(current_pool + amount));
+        env.storage()
+            .persistent()
+            .extend_ttl(&pool_key, LEDGER_THRESHOLD, LEDGER_BUMP);
 
         Ok(())
     }
@@ -1884,3 +2162,5 @@ impl CrowdfundVaultContract {
 mod test;
 #[cfg(test)]
 mod test_yield;
+#[cfg(test)]
+mod tests;

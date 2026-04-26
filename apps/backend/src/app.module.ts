@@ -3,7 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { MulterModule } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 
@@ -22,6 +22,7 @@ import { NotificationModule } from './notification/notification.module';
 import { QueueModule } from './queue/queue.module';
 import { StellarSyncModule } from './stellar-sync/stellar-sync.module';
 import { ExchangeRatesModule } from './exchange-rates/exchange-rates.module';
+import { WatchlistModule } from './watchlist/watchlist.module';
 
 import databaseConfig from './database/database.config';
 import stellarConfig from './stellar/config/stellar.config';
@@ -39,6 +40,7 @@ import { UploadModule } from './upload/upload.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { EmailModule } from './email/email.module';
 import { PortfolioModule } from './portfolio/portfolio.module';
 import databaseConfig from './database/database.config';
@@ -49,6 +51,12 @@ import { StellarService } from './services/StellarService';
 import { StellarController } from './routes/stellar';
 =======
 >>>>>>> 32ecf6ba4de3e51a30acc180ef439b0291d4ebf9
+=======
+import { GrantsModule } from './grants/grants.module';
+import { HealthModule } from './health/health.module';
+import { OutboxModule } from './outbox/outbox.module';
+import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
+>>>>>>> 8ac87a7a55f7617bca2a78c4d4bf2c6ecf4d7757
 
 @Module({
   imports: [
@@ -103,9 +111,13 @@ import { StellarController } from './routes/stellar';
     UploadModule,
     AuthModule,
     UsersModule,
+    HealthModule,
     QueueModule,
     StellarSyncModule,
     ExchangeRatesModule,
+    GrantsModule,
+    WatchlistModule,
+    OutboxModule,
   ],
   controllers: [AppController, TestController, TestExceptionController, StellarController],
   providers: [
@@ -113,6 +125,10 @@ import { StellarController } from './routes/stellar';
     {
       provide: APP_GUARD,
       useClass: RateLimitGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: IdempotencyInterceptor,
     },
   ],
 })

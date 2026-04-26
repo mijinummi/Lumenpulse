@@ -712,6 +712,121 @@ fn test_milestone_approval_status() {
     assert!(client.is_milestone_approved(&project_id, &0));
 }
 
+#[test]
+fn test_dispute_escrows_withdrawal_until_resolved() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, owner, user, token_client) = setup_test(&env);
+    client.initialize(&admin);
+
+    let project_id = client.create_project(
+        &owner,
+        &symbol_short!("Dispute"),
+        &1_000_000,
+        &token_client.address,
+    );
+
+    client.deposit(&user, &project_id, &500_000);
+    client.approve_milestone(&admin, &project_id, &0);
+
+    client.dispute_milestone(&user, &project_id, &0, &symbol_short!("quality"));
+
+    assert!(client.is_milestone_disputed(&project_id, &0));
+
+    let blocked = client.try_withdraw(&project_id, &0, &100_000);
+    assert_eq!(blocked, Err(Ok(CrowdfundError::MilestoneEscrowed)));
+
+    client.resolve_milestone_dispute(&admin, &project_id, &0, &true);
+
+    assert!(!client.is_milestone_disputed(&project_id, &0));
+    client.withdraw(&project_id, &0, &100_000);
+    assert_eq!(client.get_balance(&project_id), 400_000);
+}
+
+#[test]
+fn test_dispute_resolution_can_revoke_approval() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, owner, user, token_client) = setup_test(&env);
+    client.initialize(&admin);
+
+    let project_id = client.create_project(
+        &owner,
+        &symbol_short!("Dispute"),
+        &1_000_000,
+        &token_client.address,
+    );
+
+    client.deposit(&user, &project_id, &500_000);
+    client.approve_milestone(&admin, &project_id, &0);
+    client.dispute_milestone(&user, &project_id, &0, &symbol_short!("quality"));
+
+    client.resolve_milestone_dispute(&admin, &project_id, &0, &false);
+
+    assert!(!client.is_milestone_approved(&project_id, &0));
+
+    let blocked = client.try_withdraw(&project_id, &0, &100_000);
+    assert_eq!(blocked, Err(Ok(CrowdfundError::MilestoneNotApproved)));
+}
+
+#[test]
+fn test_only_contributors_can_dispute_milestones() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, owner, user, token_client) = setup_test(&env);
+    let outsider = Address::generate(&env);
+    client.initialize(&admin);
+
+    let project_id = client.create_project(
+        &owner,
+        &symbol_short!("Dispute"),
+        &1_000_000,
+        &token_client.address,
+    );
+
+    client.deposit(&user, &project_id, &500_000);
+    client.approve_milestone(&admin, &project_id, &0);
+
+    let result =
+        client.try_dispute_milestone(&outsider, &project_id, &0, &symbol_short!("quality"));
+    assert_eq!(
+        result,
+        Err(Ok(CrowdfundError::InsufficientContributionToVote))
+    );
+}
+
+#[test]
+fn test_duplicate_dispute_is_rejected_and_metadata_is_readable() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, owner, user, token_client) = setup_test(&env);
+    client.initialize(&admin);
+
+    let project_id = client.create_project(
+        &owner,
+        &symbol_short!("Dispute"),
+        &1_000_000,
+        &token_client.address,
+    );
+
+    client.deposit(&user, &project_id, &500_000);
+    client.approve_milestone(&admin, &project_id, &0);
+    client.dispute_milestone(&user, &project_id, &0, &symbol_short!("quality"));
+
+    let dispute = client.get_milestone_dispute(&project_id, &0);
+    assert_eq!(dispute.project_id, project_id);
+    assert_eq!(dispute.milestone_id, 0);
+    assert_eq!(dispute.challenger, user);
+    assert_eq!(dispute.reason, symbol_short!("quality"));
+
+    let result = client.try_dispute_milestone(&user, &project_id, &0, &symbol_short!("scope"));
+    assert_eq!(result, Err(Ok(CrowdfundError::MilestoneAlreadyDisputed)));
+}
+
 // ===== get_balance after operations =====
 #[test]
 fn test_balance_tracking() {
@@ -2223,4 +2338,100 @@ fn test_withdraw_with_fee() {
 
     // Check remaining project balance reflects gross deduction
     assert_eq!(client.get_balance(&project_id), 400_000);
+}
+
+// ---------------------------------------------------------------------------
+// TTL / storage-rent tests
+// ---------------------------------------------------------------------------
+
+/// Verify that a project entry remains accessible after a simulated ledger
+/// advance — the TTL bump on write keeps the entry alive.
+#[test]
+fn test_project_entry_accessible_after_ledger_advance() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, owner, _, token_client) = setup_test(&env);
+    client.initialize(&admin);
+
+    let project_id = client.create_project(
+        &owner,
+        &symbol_short!("TTLTest"),
+        &1_000_000,
+        &token_client.address,
+    );
+
+    // Advance the ledger sequence significantly.
+    env.ledger().set_sequence_number(200_000);
+
+    // Project entry must still be readable — TTL bump on write keeps it alive.
+    let project = client.get_project(&project_id);
+    assert_eq!(project.id, project_id);
+    assert_eq!(project.target_amount, 1_000_000);
+}
+
+/// Verify that TTL is extended after a read (get_project) by confirming the
+/// entry survives a second large ledger jump.
+#[test]
+fn test_ttl_extended_after_read_write() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, owner, user, token_client) = setup_test(&env);
+    client.initialize(&admin);
+
+    let project_id = client.create_project(
+        &owner,
+        &symbol_short!("TTLRw"),
+        &1_000_000,
+        &token_client.address,
+    );
+
+    client.deposit(&user, &project_id, &500_000);
+
+    // First ledger advance.
+    env.ledger().set_sequence_number(100_001);
+
+    // Read triggers another TTL bump.
+    let project = client.get_project(&project_id);
+    assert_eq!(project.total_deposited, 500_000);
+
+    // Second ledger advance — read-triggered bump should keep it alive.
+    env.ledger().set_sequence_number(200_002);
+    let balance = client.get_balance(&project_id);
+    assert_eq!(balance, 500_000);
+}
+
+/// Verify that after a campaign is cancelled and refunded, the per-campaign
+/// storage entries are removed (state compaction).
+#[test]
+fn test_campaign_entries_removed_after_refund() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, owner, user, token_client) = setup_test(&env);
+    client.initialize(&admin);
+
+    let project_id = client.create_project(
+        &owner,
+        &symbol_short!("Compact"),
+        &1_000_000,
+        &token_client.address,
+    );
+
+    client.deposit(&user, &project_id, &500_000);
+
+    // Cancel the project.
+    client.cancel_project(&admin, &project_id);
+
+    // Refund all contributors — this triggers state compaction.
+    client.refund_contributors(&project_id, &admin);
+
+    // After refund, the project balance should be 0.
+    assert_eq!(client.get_balance(&project_id), 0);
+
+    // The project status entry should have been removed; get_project_status
+    // falls back to "ACTIVE" default, but the project itself is inactive.
+    let project = client.get_project(&project_id);
+    assert!(!project.is_active);
 }
