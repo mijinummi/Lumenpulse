@@ -363,8 +363,8 @@ impl ContributorRegistryContract {
             .get(&DataKey::Badges(contributor_address.clone()))
             .unwrap_or(Vec::new(&env));
 
-        if !badges.contains(&badge) {
-            badges.push_back(badge.clone());
+        if !badges.contains(badge) {
+            badges.push_back(badge);
             env.storage()
                 .persistent()
                 .set(&DataKey::Badges(contributor_address.clone()), &badges);
@@ -398,7 +398,7 @@ impl ContributorRegistryContract {
             .get(&DataKey::Badges(contributor_address.clone()))
             .unwrap_or(Vec::new(&env));
 
-        if let Some(index) = badges.first_index_of(&badge) {
+        if let Some(index) = badges.first_index_of(badge) {
             badges.remove(index);
             env.storage()
                 .persistent()
@@ -1040,7 +1040,7 @@ mod test {
 
         let badges = client.get_badges(&contributor);
         assert_eq!(badges.len(), 1);
-        assert!(badges.contains(&Badge::EarlyAdopter));
+        assert!(badges.contains(Badge::EarlyAdopter));
 
         let id2 = client.propose(&s.alice, &ProposalAction::RevokeBadge);
         client.sign(&s.bob, &id2);
