@@ -9,7 +9,7 @@ fn test_initialization() {
     env.mock_all_auths();
     let admin = Address::generate(&env);
 
-    let contract_id = env.register_contract(None, PricingAdapterContract);
+    let contract_id = env.register(PricingAdapterContract, ());
     let client = PricingAdapterContractClient::new(&env, &contract_id);
 
     client.initialize(&admin);
@@ -27,7 +27,7 @@ fn test_set_and_get_price() {
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
 
-    let contract_id = env.register_contract(None, PricingAdapterContract);
+    let contract_id = env.register(PricingAdapterContract, ());
     let client = PricingAdapterContractClient::new(&env, &contract_id);
 
     client.initialize(&admin);
@@ -52,7 +52,7 @@ fn test_normalize_amount_same_decimals() {
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
 
-    let contract_id = env.register_contract(None, PricingAdapterContract);
+    let contract_id = env.register(PricingAdapterContract, ());
     let client = PricingAdapterContractClient::new(&env, &contract_id);
 
     client.initialize(&admin);
@@ -88,7 +88,7 @@ fn test_normalize_amount_different_decimals() {
     let admin = Address::generate(&env);
     let eth_asset = Address::generate(&env);
 
-    let contract_id = env.register_contract(None, PricingAdapterContract);
+    let contract_id = env.register(PricingAdapterContract, ());
     let client = PricingAdapterContractClient::new(&env, &contract_id);
 
     client.initialize(&admin);
