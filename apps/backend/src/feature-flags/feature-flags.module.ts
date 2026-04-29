@@ -7,7 +7,6 @@ import { FeatureFlagGuard } from './feature-flag.guard';
 
 @Module({
   imports: [TypeOrmModule.forFeature([FeatureFlag])],
-  providers: [FeatureFlagsService],
   controllers: [FeatureFlagsController],
   providers: [FeatureFlagsService, FeatureFlagGuard],
   exports: [FeatureFlagsService, FeatureFlagGuard],

@@ -12,9 +12,15 @@ describe('FeatureFlagsService', () => {
     repo = {
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(undefined),
-      save: jest.fn().mockImplementation(async (x) => ({ ...x, id: 'uuid' })),
+      save: jest
+        .fn()
+        .mockImplementation((x: Partial<FeatureFlag>) =>
+          Promise.resolve({ ...(x as object), id: 'uuid' } as FeatureFlag),
+        ),
       delete: jest.fn().mockResolvedValue(undefined),
-      create: jest.fn().mockImplementation((x) => x),
+      create: jest
+        .fn()
+        .mockImplementation((x: Partial<FeatureFlag>) => x as FeatureFlag),
     };
 
     const module: TestingModule = await Test.createTestingModule({

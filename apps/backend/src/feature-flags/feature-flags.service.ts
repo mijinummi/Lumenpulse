@@ -35,12 +35,20 @@ export class FeatureFlagsService implements OnModuleInit {
     return f ?? null;
   }
 
-  async isEnabled(key: string, _context?: Record<string, unknown>): Promise<boolean> {
+  async isEnabled(
+    key: string,
+    _context?: Record<string, unknown>,
+  ): Promise<boolean> {
+    void _context;
     const f = await this.getFlag(key);
     return !!(f && f.enabled);
   }
 
-  async upsert(key: string, enabled: boolean, conditions?: Record<string, unknown>) {
+  async upsert(
+    key: string,
+    enabled: boolean,
+    conditions?: Record<string, unknown>,
+  ) {
     let f = await this.repo.findOne({ where: { key } });
     if (!f) {
       f = this.repo.create({ key, enabled, conditions: conditions ?? null });
